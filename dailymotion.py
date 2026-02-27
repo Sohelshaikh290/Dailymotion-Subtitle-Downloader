@@ -8,7 +8,7 @@ import os
 import tempfile
 
 # --- Theme Toggle (Day / Night Mode) ---
-st.set_page_config(page_title="Dailymotion Subtitle Downloader", page_icon="🟦", layout="centered")
+st.set_page_config(page_title="Universal Subtitle Downloader", page_icon="🌐", layout="centered")
 
 mode = st.sidebar.radio("🌓 Appearance Mode", ["Auto (Streamlit Default)", "Day ☀️", "Night 🌙"])
 if mode == "Day ☀️":
@@ -30,8 +30,8 @@ elif mode == "Night 🌙":
         </style>
     """, unsafe_allow_html=True)
 
-st.title("🟦 Dailymotion Subtitle Downloader")
-st.markdown("Download subtitles from any Dailymotion video. Extract as SRT, Raw Format, or Plain Text!")
+st.title("🌐 Universal Subtitle Downloader")
+st.markdown("Download subtitles from **YouTube**, **Dailymotion**, and more. Extract as SRT, Raw Format, or Plain Text!")
 
 # --- Helper Functions ---
 def get_video_info(url):
@@ -48,7 +48,6 @@ def get_video_info(url):
                     name = tracks[0].get('name', lang)
                     subs["{} ({})".format(name, lang)] = lang
             
-            # Dailymotion rarely has auto-captions, but we leave this just in case
             if 'automatic_captions' in info and info['automatic_captions']:
                 for lang, tracks in info['automatic_captions'].items():
                     name = tracks[0].get('name', lang)
@@ -59,6 +58,7 @@ def get_video_info(url):
             return {
                 'id': info.get('id'),
                 'title': info.get('title', 'Unknown_Title'),
+                # Safely attempts to find 'uploader' (YouTube) or falls back to 'uploader_id' (Dailymotion)
                 'channel': info.get('uploader', info.get('uploader_id', 'Unknown Channel')),
                 'duration': info.get('duration', 0),
                 'thumbnail': info.get('thumbnail'),
@@ -104,7 +104,7 @@ if "processed_files" not in st.session_state:
     st.session_state.processed_files = None
 
 # --- UI Layout ---
-url = st.text_input("🔗 Paste Dailymotion Video Link Here:")
+url = st.text_input("🔗 Paste YouTube or Dailymotion Video Link Here:")
 
 if url != st.session_state.last_url:
     st.session_state.video_info = None
@@ -113,7 +113,7 @@ if url != st.session_state.last_url:
 
 if st.button("🚀 Start", type="primary"):
     if url.strip() == "":
-        st.warning("Please enter a valid Dailymotion URL first.")
+        st.warning("Please enter a valid Video URL first.")
     else:
         with st.spinner("Fetching video details and subtitles..."):
             info = get_video_info(url)
@@ -130,7 +130,10 @@ if st.session_state.video_info:
     st.markdown("---")
     col1, col2 = st.columns([1, 2])
     with col1:
-        st.image(info['thumbnail'], use_container_width=True)
+        if info['thumbnail']:
+            st.image(info['thumbnail'], use_container_width=True)
+        else:
+            st.info("No thumbnail available.")
     with col2:
         st.subheader(info['title'])
         st.write("**👤 Channel:** {}".format(info['channel']))
@@ -148,7 +151,7 @@ if st.session_state.video_info:
         # 1. Format Selection
         format_choice = st.radio(
             "1️⃣ Choose Output Format:", 
-            ["SRT (SubRip - Recommended)", "Raw (Original format from Dailymotion)", "Text Only (No Timestamps)"],
+            ["SRT (SubRip - Recommended)", "Raw (Original File Format)", "Text Only (No Timestamps)"],
             on_change=clear_processed_cache
         )
         
@@ -184,9 +187,9 @@ if st.session_state.video_info:
                             'outtmpl': os.path.join(temp_dir, '%(id)s.%(ext)s'),
                         }
                         
-                        if format_choice == "Raw (Original format from Dailymotion)":
+                        if format_choice == "Raw (Original File Format)":
                             ydl_opts['subtitlesformat'] = 'best'
-                            target_ext = None # Accept whatever extension Dailymotion gives
+                            target_ext = None # Accept whatever extension the site gives naturally (vtt, srt, ttml, etc.)
                         else:
                             # For SRT or Text, ensure FFmpeg forces it to SRT first just in case
                             ydl_opts['subtitlesformat'] = 'srt/best'
@@ -213,7 +216,7 @@ if st.session_state.video_info:
                                     if format_choice == "Text Only (No Timestamps)":
                                         data = srt_to_text(data)
                                         final_ext = "txt"
-                                    elif format_choice == "Raw (Original format from Dailymotion)":
+                                    elif format_choice == "Raw (Original File Format)":
                                         final_ext = original_file_ext
                                     else:
                                         final_ext = "srt"
