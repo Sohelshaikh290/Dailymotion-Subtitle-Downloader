@@ -58,15 +58,12 @@ def get_video_info(url):
                         subs[label] = lang
                         
             # Check for YouTube's auto-translation capabilities
-            extractor = info.get('extractor')
+            extractor = str(info.get('extractor', '')).lower()
             has_auto_translate = False
-            base_auto_lang = None
             
-            if extractor == 'youtube' and auto_langs_available:
+            # YouTube supports auto-translation if it has ANY captions (manual or auto)
+            if ('youtube' in extractor or 'youtu' in url.lower()) and (auto_langs_available or subs):
                  has_auto_translate = True
-                 # Typically YouTube uses the primary auto-generated track as the base for translation
-                 # We will just note that translation is possible
-                 pass
                         
             return {
                 'id': info.get('id'),
@@ -183,12 +180,16 @@ if st.session_state.video_info:
                 common_langs = {
                     "English (en)": "en",
                     "Bengali (bn)": "bn",
-                    "Japanese (ja)": "ja",
+                    "Hindi (hi)": "hi",
                     "Spanish (es)": "es",
                     "French (fr)": "fr",
-                    "Hindi (hi)": "hi",
-                    "Chinese (zh-Hans)": "zh-Hans",
-                    "German (de)": "de"
+                    "Japanese (ja)": "ja",
+                    "Chinese Simplified (zh-Hans)": "zh-Hans",
+                    "German (de)": "de",
+                    "Arabic (ar)": "ar",
+                    "Russian (ru)": "ru",
+                    "Portuguese (pt)": "pt",
+                    "Korean (ko)": "ko"
                 }
                 translate_choice = st.selectbox("Select Target Language for Translation:", list(common_langs.keys()))
                 translate_lang = common_langs[translate_choice]
@@ -228,8 +229,9 @@ if st.session_state.video_info:
                         
                         # Handle translation requests
                         if translate_lang:
-                            # Instruct yt-dlp to try downloading the target language
-                            # as a translated automatic caption.
+                            # yt-dlp exposes translated subs natively as auto-captions on YouTube
+                            langs_to_download.append(translate_lang)
+                            # Fallback syntax just in case yt-dlp needs strict translation flags
                             langs_to_download.append(f"*-{translate_lang}") 
 
                         ydl_opts['subtitleslangs'] = langs_to_download
