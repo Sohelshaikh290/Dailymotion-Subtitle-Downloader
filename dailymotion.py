@@ -55,9 +55,18 @@ def get_video_info(url):
                     if lang not in subs.values():
                         subs[label] = lang
                         
+            # Determine base language for translations (default to English if available)
+            base_langs = []
+            if 'automatic_captions' in info and info['automatic_captions']:
+                base_langs.extend(info['automatic_captions'].keys())
+            if 'subtitles' in info and info['subtitles']:
+                base_langs.extend(info['subtitles'].keys())
+            
+            base_lang = 'en' if 'en' in base_langs else (base_langs[0] if base_langs else None)
+
             # Add auto-translation options to the main list if it's YouTube
             if 'youtube' in info.get('extractor', '').lower() or 'youtu.be' in url.lower():
-                if subs:  # If there are ANY subs to translate from
+                if base_lang:  # If there are ANY subs to translate from
                     translate_langs = {
                         "English": "en", "Bengali": "bn", "Hindi": "hi", 
                         "Spanish": "es", "French": "fr", "Japanese": "ja", 
@@ -66,7 +75,6 @@ def get_video_info(url):
                     }
                     for t_name, t_code in translate_langs.items():
                         label = "{} ({}) [Auto-Translated]".format(t_name, t_code)
-                        # Use a custom prefix to identify translation selections later
                         subs[label] = "translate:{}".format(t_code)
                         
             return {
@@ -76,7 +84,8 @@ def get_video_info(url):
                 'channel': info.get('uploader', info.get('uploader_id', 'Unknown Channel')),
                 'duration': info.get('duration', 0),
                 'thumbnail': info.get('thumbnail'),
-                'available_subs': subs
+                'available_subs': subs,
+                'base_lang': base_lang
             }
     except Exception as e:
         return None
@@ -194,14 +203,19 @@ if st.session_state.video_info:
                 with st.spinner("Extracting & Processing..."):
                     safe_title = clean_filename(info['title'])
                     
-                    # Process selected language codes and handle translation syntax
+                    # Process selected language codes and handle exact translation syntax
                     selected_lang_codes = []
+                    base_lang = info.get('base_lang')
+                    
                     for label in selected_langs:
                         code = subs_map[label]
                         if code.startswith("translate:"):
                             target = code.split(":")[1]
-                            selected_lang_codes.append(target)
-                            selected_lang_codes.append(".*-{}".format(target)) # Correct regex for translation
+                            if base_lang:
+                                # yt-dlp expects exact format like "en-bn" for translations
+                                selected_lang_codes.append("{}-{}".format(base_lang, target))
+                            else:
+                                selected_lang_codes.append(target)
                         else:
                             selected_lang_codes.append(code)
                     
@@ -218,12 +232,10 @@ if st.session_state.video_info:
                         
                         if format_choice == "Raw (Original File Format)":
                             ydl_opts['subtitlesformat'] = 'best'
-                            target_ext = None # Accept whatever extension the site gives naturally (vtt, srt, ttml, etc.)
                         else:
                             # For SRT or Text, ensure FFmpeg forces it to SRT first just in case
                             ydl_opts['subtitlesformat'] = 'srt/best'
                             ydl_opts['convertsubtitles'] = 'srt'
-                            target_ext = '.srt'
                         
                         try:
                             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -233,11 +245,11 @@ if st.session_state.video_info:
                             for file in os.listdir(temp_dir):
                                 file_path = os.path.join(temp_dir, file)
                                 
-                                # Read the file data
+                                # Read EVERY file downloaded, even if FFmpeg failed to convert to SRT
                                 with open(file_path, 'rb') as f:
                                     data = f.read()
                                 
-                                # Identify language code from file (e.g., id.en.srt or id.ru.vtt)
+                                # Identify language code from file (e.g., id.en.srt or id.en-bn.vtt)
                                 parts = file.split('.')
                                 lang_code = parts[-2] if len(parts) >= 3 else "sub"
                                 original_file_ext = parts[-1]
@@ -249,10 +261,10 @@ if st.session_state.video_info:
                                 elif format_choice == "Raw (Original File Format)":
                                     final_ext = original_file_ext
                                 else:
-                                    # If they wanted SRT, but FFmpeg failed to convert, we fallback to the original extension
-                                    final_ext = original_file_ext
+                                    # Fallback to original ext if FFmpeg failed to make it .srt
+                                    final_ext = original_file_ext 
                                     if original_file_ext != "srt":
-                                        st.warning("⚠️ FFmpeg not detected! Could not convert {} to SRT. Providing raw .{} file instead.".format(lang_code, original_file_ext))
+                                        st.warning("⚠️ FFmpeg missing! Providing raw .{} file instead.".format(original_file_ext))
                                     
                                 # Name perfectly if only 1 language selected
                                 if len(selected_langs) == 1:
