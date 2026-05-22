@@ -43,10 +43,13 @@ def get_video_info(url):
             
             # Parse available subtitles
             subs = {}
+            all_available_codes = []
+            
             if 'subtitles' in info and info['subtitles']:
                 for lang, tracks in info['subtitles'].items():
                     name = tracks[0].get('name', lang)
                     subs["{} ({})".format(name, lang)] = lang
+                    all_available_codes.append(lang)
             
             if 'automatic_captions' in info and info['automatic_captions']:
                 for lang, tracks in info['automatic_captions'].items():
@@ -54,19 +57,11 @@ def get_video_info(url):
                     label = "{} ({}) [Auto-generated]".format(name, lang)
                     if lang not in subs.values():
                         subs[label] = lang
-                        
-            # Determine base language for translations (default to English if available)
-            base_langs = []
-            if 'automatic_captions' in info and info['automatic_captions']:
-                base_langs.extend(info['automatic_captions'].keys())
-            if 'subtitles' in info and info['subtitles']:
-                base_langs.extend(info['subtitles'].keys())
+                    all_available_codes.append(lang)
             
-            base_lang = 'en' if 'en' in base_langs else (base_langs[0] if base_langs else None)
-
             # Add auto-translation options to the main list if it's YouTube
             if 'youtube' in info.get('extractor', '').lower() or 'youtu.be' in url.lower():
-                if base_lang:  # If there are ANY subs to translate from
+                if all_available_codes:  # If there are ANY subs to translate from
                     translate_langs = {
                         "English": "en", "Bengali": "bn", "Hindi": "hi", 
                         "Spanish": "es", "French": "fr", "Japanese": "ja", 
@@ -75,8 +70,14 @@ def get_video_info(url):
                     }
                     for t_name, t_code in translate_langs.items():
                         label = "{} ({}) [Auto-Translated]".format(t_name, t_code)
-                        subs[label] = "translate:{}".format(t_code)
-                        
+                        # Check if yt-dlp already provided the exact translation key (e.g., 'hi-bn', 'en-bn')
+                        exact_matches = [c for c in all_available_codes if c.endswith("-{}".format(t_code))]
+                        if exact_matches:
+                            subs[label] = exact_matches[0] # Use the exact key provided by YouTube
+                        else:
+                            # Fallback to regex: Match ANY base language translating to target
+                            subs[label] = ".*-{}".format(t_code)
+            
             return {
                 'id': info.get('id'),
                 'title': info.get('title', 'Unknown_Title'),
@@ -84,8 +85,7 @@ def get_video_info(url):
                 'channel': info.get('uploader', info.get('uploader_id', 'Unknown Channel')),
                 'duration': info.get('duration', 0),
                 'thumbnail': info.get('thumbnail'),
-                'available_subs': subs,
-                'base_lang': base_lang
+                'available_subs': subs
             }
     except Exception as e:
         return None
@@ -99,7 +99,7 @@ def clear_processed_cache():
     st.session_state.processed_files = None
 
 def srt_to_text(srt_bytes):
-    """Strips timestamps, sequence numbers, WEBVTT headers, and HTML tags to provide pure text."""
+    """Strips timestamps, sequence numbers, and HTML tags from SRT/VTT to provide pure text."""
     text = srt_bytes.decode('utf-8', errors='ignore')
     # Remove HTML formatting tags (like <i>, <font>)
     text = re.sub(r'<[^>]+>', '', text)
@@ -110,14 +110,13 @@ def srt_to_text(srt_bytes):
         stripped = line.strip()
         if not stripped:
             continue
-        if stripped.upper() == "WEBVTT": # Skip VTT header
-            continue
         if stripped.isdigit():  # Skip sequence numbers
             continue
         if '-->' in stripped:   # Skip timestamp lines
             continue
-        # Skip weird VTT styling tags that sometimes bleed through
-        if stripped.startswith("Style:") or stripped.startswith("Kind:") or stripped.startswith("Language:"):
+        if stripped.upper() == 'WEBVTT': # Skip VTT headers
+            continue
+        if stripped.startswith('Kind:') or stripped.startswith('Language:'):
             continue
         clean_lines.append(stripped)
         
@@ -183,12 +182,12 @@ if st.session_state.video_info:
             on_change=clear_processed_cache
         )
         
-        # 2. Language Selection (Now includes auto-translations)
-        select_all = st.checkbox("✅ Select All Available Languages (Includes Translations)", on_change=clear_processed_cache)
+        # 2. Language Selection
+        select_all = st.checkbox("✅ Select All Available Languages", on_change=clear_processed_cache)
         
         if select_all:
             selected_langs = all_langs
-            st.info("{} languages/translations selected.".format(len(all_langs)))
+            st.info("{} languages selected.".format(len(all_langs)))
         else:
             selected_langs = st.multiselect(
                 "2️⃣ Pick specific languages:", 
@@ -203,21 +202,9 @@ if st.session_state.video_info:
                 with st.spinner("Extracting & Processing..."):
                     safe_title = clean_filename(info['title'])
                     
-                    # Process selected language codes and handle exact translation syntax
-                    selected_lang_codes = []
-                    base_lang = info.get('base_lang')
-                    
-                    for label in selected_langs:
-                        code = subs_map[label]
-                        if code.startswith("translate:"):
-                            target = code.split(":")[1]
-                            if base_lang:
-                                # yt-dlp expects exact format like "en-bn" for translations
-                                selected_lang_codes.append("{}-{}".format(base_lang, target))
-                            else:
-                                selected_lang_codes.append(target)
-                        else:
-                            selected_lang_codes.append(code)
+                    # The translation logic is now handled perfectly during info extraction
+                    # We just pass the exact string or regex directly to yt-dlp!
+                    selected_lang_codes = [subs_map[label] for label in selected_langs]
                     
                     with tempfile.TemporaryDirectory() as temp_dir:
                         # Configure yt-dlp based on selected format
@@ -233,7 +220,7 @@ if st.session_state.video_info:
                         if format_choice == "Raw (Original File Format)":
                             ydl_opts['subtitlesformat'] = 'best'
                         else:
-                            # For SRT or Text, ensure FFmpeg forces it to SRT first just in case
+                            # For SRT or Text, request SRT first. If FFmpeg is missing, yt-dlp ignores this and outputs vtt.
                             ydl_opts['subtitlesformat'] = 'srt/best'
                             ydl_opts['convertsubtitles'] = 'srt'
                         
@@ -243,16 +230,21 @@ if st.session_state.video_info:
                             
                             processed = []
                             for file in os.listdir(temp_dir):
-                                file_path = os.path.join(temp_dir, file)
-                                
-                                # Read EVERY file downloaded, even if FFmpeg failed to convert to SRT
-                                with open(file_path, 'rb') as f:
+                                # Skip any non-subtitle files that might accidentally be generated
+                                if file.endswith('.json') or file.endswith('.mp4') or file.endswith('.webm'):
+                                    continue
+                                    
+                                with open(os.path.join(temp_dir, file), 'rb') as f:
                                     data = f.read()
                                 
-                                # Identify language code from file (e.g., id.en.srt or id.en-bn.vtt)
+                                # Identify language code from file (e.g., id.en.srt)
                                 parts = file.split('.')
                                 lang_code = parts[-2] if len(parts) >= 3 else "sub"
                                 original_file_ext = parts[-1]
+                                
+                                # Fallback check: If we asked for SRT but got VTT, FFmpeg might be missing
+                                if format_choice == "SRT (SubRip - Recommended)" and original_file_ext != "srt":
+                                    st.warning(f"Note: Saved as {original_file_ext.upper()} because FFmpeg is missing on the server.")
                                 
                                 # Apply Text parsing if requested
                                 if format_choice == "Text Only (No Timestamps)":
@@ -261,12 +253,9 @@ if st.session_state.video_info:
                                 elif format_choice == "Raw (Original File Format)":
                                     final_ext = original_file_ext
                                 else:
-                                    # Fallback to original ext if FFmpeg failed to make it .srt
-                                    final_ext = original_file_ext 
-                                    if original_file_ext != "srt":
-                                        st.warning("⚠️ FFmpeg missing! Providing raw .{} file instead.".format(original_file_ext))
+                                    final_ext = original_file_ext # Use what yt-dlp gave us (srt or fallback vtt)
                                     
-                                # Name perfectly if only 1 language selected
+                                # Name perfectly based on number of files
                                 if len(selected_langs) == 1:
                                     final_name = "{}.{}".format(safe_title, final_ext)
                                 else:
