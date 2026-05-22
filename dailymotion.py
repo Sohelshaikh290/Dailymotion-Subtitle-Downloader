@@ -81,14 +81,14 @@ Download subtitles from:
 - Vimeo
 - Other supported sites
 
-Extract subtitles as:
+Export as:
 
 - SRT
-- Original Format
+- Original Subtitle File
 - Plain Text
 """)
 
-st.caption("✅ Best compatibility: YouTube videos with captions enabled.")
+st.caption("✅ Shows ONLY real subtitles available from the video.")
 
 # =========================================================
 # SESSION STATE
@@ -106,12 +106,9 @@ if "process_clicked" not in st.session_state:
     st.session_state.process_clicked = False
 
 # =========================================================
-# HELPER FUNCTIONS
+# HELPERS
 # =========================================================
 def clean_filename(title):
-    """
-    Removes characters invalid for Windows/Mac filenames.
-    """
     return re.sub(r'[\\/*?:"<>|]', "", title)
 
 
@@ -120,12 +117,9 @@ def clear_processed_cache():
     st.session_state.process_clicked = False
 
 
-def srt_to_text(srt_bytes):
-    """
-    Convert subtitle file into plain readable text.
-    """
+def subtitle_to_text(subtitle_bytes):
 
-    text = srt_bytes.decode(errors="ignore")
+    text = subtitle_bytes.decode(errors="ignore")
 
     # Remove HTML tags
     text = re.sub(r"<[^>]+>", "", text)
@@ -135,20 +129,25 @@ def srt_to_text(srt_bytes):
     clean_lines = []
 
     for line in lines:
+
         stripped = line.strip()
 
         if not stripped:
             continue
 
+        # Skip subtitle numbers
         if stripped.isdigit():
             continue
 
+        # Skip timestamps
         if "-->" in stripped:
             continue
 
+        # Skip WEBVTT
         if stripped.upper() == "WEBVTT":
             continue
 
+        # Skip metadata
         if stripped.startswith("Kind:"):
             continue
 
@@ -161,7 +160,7 @@ def srt_to_text(srt_bytes):
 
 
 # =========================================================
-# VIDEO INFO FUNCTION
+# GET VIDEO INFO
 # =========================================================
 def get_video_info(url):
 
@@ -172,15 +171,16 @@ def get_video_info(url):
     }
 
     try:
+
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
 
             info = ydl.extract_info(url, download=False)
 
-            subs = {}
+            subtitles = {}
 
-            # -------------------------------------------------
+            # =================================================
             # MANUAL SUBTITLES
-            # -------------------------------------------------
+            # =================================================
             if info.get("subtitles"):
 
                 for lang, tracks in info["subtitles"].items():
@@ -192,11 +192,11 @@ def get_video_info(url):
 
                     label = f"{name} ({lang})"
 
-                    subs[label] = lang
+                    subtitles[label] = lang
 
-            # -------------------------------------------------
-            # AUTO GENERATED SUBTITLES
-            # -------------------------------------------------
+            # =================================================
+            # AUTO SUBTITLES
+            # =================================================
             if info.get("automatic_captions"):
 
                 for lang, tracks in info["automatic_captions"].items():
@@ -208,35 +208,8 @@ def get_video_info(url):
 
                     label = f"{name} ({lang}) [Auto-generated]"
 
-                    if lang not in subs.values():
-                        subs[label] = lang
-
-            # -------------------------------------------------
-            # AUTO TRANSLATION OPTIONS
-            # -------------------------------------------------
-            extractor = info.get("extractor", "").lower()
-
-            if "youtube" in extractor or "youtu.be" in url.lower():
-
-                translate_langs = {
-                    "English": "en",
-                    "Bengali": "bn",
-                    "Hindi": "hi",
-                    "Spanish": "es",
-                    "French": "fr",
-                    "Japanese": "ja",
-                    "Arabic": "ar",
-                    "Russian": "ru",
-                    "Portuguese": "pt",
-                    "Korean": "ko",
-                    "Chinese": "zh-Hans"
-                }
-
-                for t_name, t_code in translate_langs.items():
-
-                    label = f"{t_name} ({t_code}) [Auto-Translated]"
-
-                    subs[label] = t_code
+                    if lang not in subtitles.values():
+                        subtitles[label] = lang
 
             return {
                 "id": info.get("id"),
@@ -247,24 +220,24 @@ def get_video_info(url):
                 ),
                 "duration": info.get("duration", 0),
                 "thumbnail": info.get("thumbnail"),
-                "available_subs": subs
+                "available_subs": subtitles
             }
 
     except Exception as e:
 
-        st.error(f"DEBUG ERROR:\n\n{str(e)}")
+        st.error(f"Error:\n\n{str(e)}")
 
         return None
 
 
 # =========================================================
-# UI
+# INPUT
 # =========================================================
 url = st.text_input(
     "🔗 Paste Video URL Here:"
 )
 
-# Reset if URL changes
+# Reset state if URL changes
 if url != st.session_state.last_url:
 
     st.session_state.video_info = None
@@ -273,7 +246,7 @@ if url != st.session_state.last_url:
     st.session_state.last_url = url
 
 # =========================================================
-# FETCH BUTTON
+# FETCH VIDEO
 # =========================================================
 if st.button("🚀 Start", type="primary"):
 
@@ -291,13 +264,15 @@ if st.button("🚀 Start", type="primary"):
 
                 st.session_state.video_info = info
                 st.session_state.processed_files = None
+
                 st.success("Video loaded successfully!")
 
             else:
-                st.error("Failed to fetch video details.")
+
+                st.error("Failed to fetch video information.")
 
 # =========================================================
-# VIDEO DISPLAY
+# DISPLAY VIDEO INFO
 # =========================================================
 if st.session_state.video_info:
 
@@ -307,22 +282,21 @@ if st.session_state.video_info:
 
     col1, col2 = st.columns([1, 2])
 
-    # -----------------------------------------------------
-    # THUMBNAIL
-    # -----------------------------------------------------
+    # Thumbnail
     with col1:
 
         if info["thumbnail"]:
+
             st.image(
                 info["thumbnail"],
                 use_container_width=True
             )
+
         else:
+
             st.info("No thumbnail available.")
 
-    # -----------------------------------------------------
-    # VIDEO DETAILS
-    # -----------------------------------------------------
+    # Metadata
     with col2:
 
         st.subheader(info["title"])
@@ -340,67 +314,67 @@ if st.session_state.video_info:
     # =====================================================
     st.markdown("## 📝 Subtitle Settings")
 
-    subs_map = info["available_subs"]
+    subtitles_map = info["available_subs"]
 
-    if not subs_map:
+    if not subtitles_map:
 
         st.warning("No subtitles found for this video.")
 
     else:
 
-        all_langs = list(subs_map.keys())
+        all_languages = list(subtitles_map.keys())
 
-        # -------------------------------------------------
+        # =================================================
         # FORMAT
-        # -------------------------------------------------
+        # =================================================
         format_choice = st.radio(
             "1️⃣ Choose Output Format",
             [
                 "SRT (Recommended)",
-                "Raw (Original Format)",
-                "Text Only (No Timestamps)"
+                "Original Format",
+                "Text Only"
             ],
             on_change=clear_processed_cache
         )
 
-        # -------------------------------------------------
+        # =================================================
         # SELECT ALL
-        # -------------------------------------------------
+        # =================================================
         select_all = st.checkbox(
             "✅ Select All Languages",
             on_change=clear_processed_cache
         )
 
-        # -------------------------------------------------
-        # MULTISELECT
-        # -------------------------------------------------
+        # =================================================
+        # LANGUAGE SELECTION
+        # =================================================
         if select_all:
 
-            selected_langs = all_langs
+            selected_languages = all_languages
 
-            st.info(f"{len(all_langs)} languages selected.")
+            st.info(f"{len(all_languages)} languages selected.")
 
         else:
 
-            selected_langs = st.multiselect(
-                "2️⃣ Choose Languages",
-                options=all_langs,
-                default=[all_langs[0]] if all_langs else [],
+            selected_languages = st.multiselect(
+                "2️⃣ Choose Subtitle Languages",
+                options=all_languages,
+                default=[all_languages[0]] if all_languages else [],
                 on_change=clear_processed_cache
             )
 
         # =================================================
         # PROCESS BUTTON
         # =================================================
-        if selected_langs:
+        if selected_languages:
 
             if st.button("⚙️ Process Subtitles"):
 
                 st.session_state.process_clicked = True
 
-            # ---------------------------------------------
-            # PROCESS
-            # ---------------------------------------------
+            # =================================================
+            # PROCESSING
+            # =================================================
             if st.session_state.process_clicked:
 
                 with st.spinner("Processing subtitles..."):
@@ -409,9 +383,9 @@ if st.session_state.video_info:
                         info["title"]
                     )
 
-                    selected_lang_codes = [
-                        subs_map[label]
-                        for label in selected_langs
+                    selected_language_codes = [
+                        subtitles_map[label]
+                        for label in selected_languages
                     ]
 
                     with tempfile.TemporaryDirectory() as temp_dir:
@@ -421,17 +395,17 @@ if st.session_state.video_info:
                             "skip_download": True,
                             "writesubtitles": True,
                             "writeautomaticsub": True,
-                            "subtitleslangs": selected_lang_codes,
+                            "subtitleslangs": selected_language_codes,
                             "outtmpl": os.path.join(
                                 temp_dir,
                                 "%(id)s.%(ext)s"
                             )
                         }
 
-                        # ---------------------------------
+                        # =========================================
                         # FORMAT OPTIONS
-                        # ---------------------------------
-                        if format_choice == "Raw (Original Format)":
+                        # =========================================
+                        if format_choice == "Original Format":
 
                             ydl_opts["subtitlesformat"] = "best"
 
@@ -446,14 +420,14 @@ if st.session_state.video_info:
 
                                 ydl.download([url])
 
-                            processed = []
+                            processed_files = []
 
-                            # -----------------------------
-                            # READ GENERATED FILES
-                            # -----------------------------
+                            # =====================================
+                            # READ FILES
+                            # =====================================
                             for file in os.listdir(temp_dir):
 
-                                # Ignore junk files
+                                # Skip junk files
                                 if file.endswith(
                                     (
                                         ".json",
@@ -474,42 +448,44 @@ if st.session_state.video_info:
 
                                     data = f.read()
 
-                                # Better filename parsing
+                                # =================================
+                                # FILE NAME PARSING
+                                # =================================
                                 name_without_ext, ext = os.path.splitext(file)
 
-                                original_file_ext = ext.replace(".", "")
+                                original_ext = ext.replace(".", "")
 
                                 lang_code = (
                                     name_without_ext.split(".")[-1]
                                 )
 
-                                # -------------------------
-                                # TEXT CONVERSION
-                                # -------------------------
-                                if format_choice == "Text Only (No Timestamps)":
+                                # =================================
+                                # TEXT ONLY
+                                # =================================
+                                if format_choice == "Text Only":
 
-                                    data = srt_to_text(data)
+                                    data = subtitle_to_text(data)
 
                                     final_ext = "txt"
 
+                                # =================================
+                                # SRT
+                                # =================================
                                 elif format_choice == "SRT (Recommended)":
 
-                                    if original_file_ext != "srt":
+                                    final_ext = original_ext
 
-                                        st.warning(
-                                            f"Saved as {original_file_ext.upper()} because FFmpeg conversion failed."
-                                        )
-
-                                    final_ext = original_file_ext
-
+                                # =================================
+                                # RAW
+                                # =================================
                                 else:
 
-                                    final_ext = original_file_ext
+                                    final_ext = original_ext
 
-                                # -------------------------
+                                # =================================
                                 # OUTPUT NAME
-                                # -------------------------
-                                if len(selected_langs) == 1:
+                                # =================================
+                                if len(selected_languages) == 1:
 
                                     final_name = (
                                         f"{safe_title}.{final_ext}"
@@ -521,25 +497,26 @@ if st.session_state.video_info:
                                         f"{safe_title} [{lang_code}].{final_ext}"
                                     )
 
-                                processed.append(
+                                processed_files.append(
                                     (
                                         final_name,
                                         data
                                     )
                                 )
 
-                            # -----------------------------
+                            # =====================================
                             # NO FILES
-                            # -----------------------------
-                            if not processed:
+                            # =====================================
+                            if not processed_files:
 
-                                st.error(
-                                    "No subtitle files were generated."
+                                st.warning(
+                                    "No subtitle files were generated.\n\n"
+                                    "This video may not expose downloadable subtitles."
                                 )
 
                             else:
 
-                                st.session_state.processed_files = processed
+                                st.session_state.processed_files = processed_files
 
                                 st.success(
                                     "✅ Subtitles processed successfully!"
@@ -552,17 +529,19 @@ if st.session_state.video_info:
                             )
 
         # =================================================
-        # DOWNLOAD SECTION
+        # DOWNLOADS
         # =================================================
         if st.session_state.processed_files:
 
             processed_files = st.session_state.processed_files
 
-            safe_title = clean_filename(info["title"])
+            safe_title = clean_filename(
+                info["title"]
+            )
 
-            # ---------------------------------------------
+            # =============================================
             # SINGLE FILE
-            # ---------------------------------------------
+            # =============================================
             if len(processed_files) == 1:
 
                 file_name, data = processed_files[0]
@@ -574,9 +553,9 @@ if st.session_state.video_info:
                     mime="text/plain"
                 )
 
-            # ---------------------------------------------
-            # MULTIPLE FILES -> ZIP
-            # ---------------------------------------------
+            # =============================================
+            # MULTIPLE FILES
+            # =============================================
             else:
 
                 zip_buffer = io.BytesIO()
