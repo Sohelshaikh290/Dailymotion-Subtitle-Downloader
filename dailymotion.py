@@ -232,7 +232,7 @@ if st.session_state.video_info:
                             # yt-dlp exposes translated subs natively as auto-captions on YouTube
                             langs_to_download.append(translate_lang)
                             # Fallback syntax just in case yt-dlp needs strict translation flags
-                            langs_to_download.append(f"*-{translate_lang}") 
+                            langs_to_download.append(f".*-{translate_lang}") 
 
                         ydl_opts['subtitleslangs'] = langs_to_download
                         
